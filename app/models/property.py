@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import List, Optional
+from aiogram.filters import Command
 from sqlalchemy import String, Integer, Float, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, TimestampMixin
