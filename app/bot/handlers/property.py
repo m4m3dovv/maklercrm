@@ -39,13 +39,13 @@ def get_property_type_kb():
 
 def get_finish_photo_kb():
     kb = ReplyKeyboardBuilder()
-    kb.button(text="✅ Şəkillər bitdi (Yadda saxla)")
+    kb.button(text="✅ Şəkillər Bitdi")
     kb.button(text="❌ Ləğv et")
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
 
 
-# ======================== EVLƏR BÖLMƏSİ VƏ FSM (ƏLAVƏ ETMƏK) ========================
+# ======================== EVLƏR BÖLMƏSİ ========================
 @router.message(F.text == "🏠 Evlər")
 async def property_menu(message: Message):
     text = (
@@ -55,22 +55,19 @@ async def property_menu(message: Message):
     )
     await message.answer(text, parse_mode="HTML")
 
-
 @router.message(Command("add_property"))
 async def start_add_property(message: Message, state: FSMContext):
     await state.set_state(AddPropertyStates.waiting_for_deal_type)
     await message.answer("Əmlak satılır, yoxsa kirayə verilir?", reply_markup=get_deal_type_kb())
 
-
-@router.message(AddPropertyStates.waiting_for_deal_type, F.text.in_(["Satılır", "Kirayə verilir"]))
+@router.message(AddPropertyStates.waiting_for_deal_type)
 async def process_deal_type(message: Message, state: FSMContext):
-    deal = DealType.SATIS if message.text == "Satılır" else DealType.KIRAYE
+    deal = DealType.SATIS if "Satılır" in message.text else DealType.KIRAYE
     await state.update_data(deal_type=deal)
     await state.set_state(AddPropertyStates.waiting_for_property_type)
     await message.answer("Əmlakın növünü seçin:", reply_markup=get_property_type_kb())
 
-
-@router.message(AddPropertyStates.waiting_for_property_type, F.text)
+@router.message(AddPropertyStates.waiting_for_property_type)
 async def process_property_type(message: Message, state: FSMContext):
     prop_map = {
         "Bina evi": PropertyType.BINA_EVI,
@@ -84,114 +81,96 @@ async def process_property_type(message: Message, state: FSMContext):
     await state.set_state(AddPropertyStates.waiting_for_title)
     await message.answer("Yeni əmlak üçün qısa başlıq yazın (Məs: Gənclikdə 3 otaqlı):", reply_markup=get_cancel_menu())
 
-
-@router.message(AddPropertyStates.waiting_for_title, F.text)
+@router.message(AddPropertyStates.waiting_for_title)
 async def process_title(message: Message, state: FSMContext):
     await state.update_data(title=message.text)
     await state.set_state(AddPropertyStates.waiting_for_district)
     await message.answer("Əmlakın yerləşdiyi rayonu daxil edin (Məs: Nərimanov):")
 
-
-@router.message(AddPropertyStates.waiting_for_district, F.text)
+@router.message(AddPropertyStates.waiting_for_district)
 async def process_district(message: Message, state: FSMContext):
     await state.update_data(district=message.text)
     await state.set_state(AddPropertyStates.waiting_for_address)
     await message.answer("Dəqiq ünvanı daxil edin:")
 
-
-@router.message(AddPropertyStates.waiting_for_address, F.text)
+@router.message(AddPropertyStates.waiting_for_address)
 async def process_address(message: Message, state: FSMContext):
     await state.update_data(address=message.text)
     await state.set_state(AddPropertyStates.waiting_for_room_count)
     await message.answer("Otaq sayını daxil edin (Torpaqdırsa 0 yazın):")
 
-
-@router.message(AddPropertyStates.waiting_for_room_count, F.text)
+@router.message(AddPropertyStates.waiting_for_room_count)
 async def process_room(message: Message, state: FSMContext):
-    await state.update_data(room_count=int(message.text) if message.text.isdigit() else 0)
+    await state.update_data(room_count=int(message.text) if message.text and message.text.isdigit() else 0)
     await state.set_state(AddPropertyStates.waiting_for_floor)
     await message.answer("Neçənci mərtəbədə yerləşir? (Bina evi deyilsə 1 yazın):")
 
-
-@router.message(AddPropertyStates.waiting_for_floor, F.text)
+@router.message(AddPropertyStates.waiting_for_floor)
 async def process_floor(message: Message, state: FSMContext):
-    await state.update_data(floor=int(message.text) if message.text.isdigit() else 1)
+    await state.update_data(floor=int(message.text) if message.text and message.text.isdigit() else 1)
     await state.set_state(AddPropertyStates.waiting_for_total_floors)
     await message.answer("Binanın ümumi mərtəbə sayını daxil edin (Həyət evidirsə 1 yazın):")
 
-
-@router.message(AddPropertyStates.waiting_for_total_floors, F.text)
+@router.message(AddPropertyStates.waiting_for_total_floors)
 async def process_total_floors(message: Message, state: FSMContext):
-    await state.update_data(total_floors=int(message.text) if message.text.isdigit() else 1)
+    await state.update_data(total_floors=int(message.text) if message.text and message.text.isdigit() else 1)
     await state.set_state(AddPropertyStates.waiting_for_area)
     await message.answer("Sahəsini daxil edin (kv.m və ya sot):")
 
-
-@router.message(AddPropertyStates.waiting_for_area, F.text)
+@router.message(AddPropertyStates.waiting_for_area)
 async def process_area(message: Message, state: FSMContext):
     try:
         area = float(message.text.replace(',', '.'))
-    except ValueError:
-        return await message.answer("Xahiş olunur, düzgün rəqəm daxil edin:")
+    except (ValueError, AttributeError):
+        area = 1.0
     await state.update_data(area=area)
     await state.set_state(AddPropertyStates.waiting_for_document_type)
     await message.answer("Sənədin növünü yazın (Çıxarış, Müqavilə, Bələdiyyə və s.):")
 
-
-@router.message(AddPropertyStates.waiting_for_document_type, F.text)
+@router.message(AddPropertyStates.waiting_for_document_type)
 async def process_doc(message: Message, state: FSMContext):
     await state.update_data(document_type=message.text)
     await state.set_state(AddPropertyStates.waiting_for_owner_phone)
     await message.answer("Ev sahibinin (müştərinin) əlaqə nömrəsini daxil edin:")
 
-
-@router.message(AddPropertyStates.waiting_for_owner_phone, F.text)
+@router.message(AddPropertyStates.waiting_for_owner_phone)
 async def process_owner(message: Message, state: FSMContext):
     await state.update_data(owner_phone=message.text)
     await state.set_state(AddPropertyStates.waiting_for_price)
     await message.answer("Əmlakın qiymətini (AZN) daxil edin (Məsələn: 125000):")
 
-
-@router.message(AddPropertyStates.waiting_for_price, F.text)
+@router.message(AddPropertyStates.waiting_for_price)
 async def process_price(message: Message, state: FSMContext):
     try:
         price = float(message.text.replace(',', '.'))
-    except ValueError:
+    except (ValueError, AttributeError):
         return await message.answer("Xahiş olunur, düzgün məbləğ daxil edin:")
         
-    await state.update_data(price=price, photo_ids=[]) # Şəkil siyahısını yaradırıq
+    await state.update_data(price=price, photo_ids=[])
     await state.set_state(AddPropertyStates.waiting_for_photos)
     
     await message.answer(
-        "Əla! İndi mənə əmlakın şəkillərini göndərin (Maksimum 30 ədəd).\n\n"
-        "Bütün şəkillər yüklənib bitdikdən sonra aşağıdakı\n"
-        "<b>'✅ Şəkillər bitdi (Yadda saxla)'</b> düyməsini sıxın.", 
+        "Əla! İndi mənə əmlakın şəkillərini göndərin.\n\n"
+        "Şəkillər yükləndikdən sonra aşağıdakı\n"
+        "<b>'✅ Şəkillər Bitdi'</b> düyməsini sıxın.", 
         reply_markup=get_finish_photo_kb(), parse_mode="HTML"
     )
 
-# ŞƏKİLLƏRİN QƏBULU
-@router.message(AddPropertyStates.waiting_for_photos, F.photo)
-async def collect_photos(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photo_ids", [])
-    
-    file_id = message.photo[-1].file_id
-    if file_id not in photos:
-        photos.append(file_id)
-        await state.update_data(photo_ids=photos)
-        
-# ŞƏKİL GÖZLƏNİLƏRKƏN DÜYMƏYƏ VƏ YA MƏTNƏ REAKSİYA
+# ======================== ŞƏKİLLƏRİN QƏBULU ========================
 @router.message(AddPropertyStates.waiting_for_photos)
-async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
-    # Əgər düymənin özü deyilsə xəbərdarlıq edirik.
-    if message.text != "✅ Şəkillər bitdi (Yadda saxla)":
-        return await message.answer("Xahiş olunur, yalnız şəkil göndərin və ya aşağıdakı '✅ Şəkillər bitdi' düyməsini sıxın.")
-        
+async def collect_and_save_photos(message: Message, state: FSMContext, **kwargs):
+    # Əgər göndərilən şey şəkildirsə: siyahıya atıb gözləyirik (return edirik)
+    if message.photo:
+        data = await state.get_data()
+        photos = data.get("photo_ids", [])
+        photos.append(message.photo[-1].file_id)
+        await state.update_data(photo_ids=photos)
+        return
+
+    # Şəkil deyilsə, fərz edirik ki DÜYMƏYƏ BASILDI (və ya başqa söz yazıldı)
+    # Düymə mətni tam olaraq tutmaq üçün contains istifadə etmirik
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
-    
-    # 1 saniyə gözləyirik ki Telegramdan bütün şəkillər axıb yığılsın
-    await asyncio.sleep(1)
     
     data = await state.get_data()
     photos = data.get("photo_ids", [])
