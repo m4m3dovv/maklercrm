@@ -59,8 +59,8 @@ async def main():
     dp = Dispatcher()
     
     # Middleware-lərin qeydiyyatı (Sıra önəmlidir: Öncə DB, sonra Auth)
-    dp.update.outer_middleware(DbSessionMiddleware())
-    dp.update.outer_middleware(AuthMiddleware())
+ #   dp.update.outer_middleware(DbSessionMiddleware())
+ #   dp.update.outer_middleware(AuthMiddleware())
     
     # Routerlərin qeydiyyatı
     dp.include_router(common_router)
