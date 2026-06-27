@@ -1,9 +1,10 @@
 import json
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from app.models.user import User
 from app.bot.states.property_states import AddPropertyStates
@@ -13,10 +14,11 @@ from app.schemas.property import PropertyCreate
 from app.services.property_service import PropertyService
 from app.models.property import PropertyStatus, PropertyType, DealType
 from app.repositories.property_repo import property_repo
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+
 
 router = Router(name="property_router")
 
+# ======================== MENYULAR ========================
 def get_deal_type_kb():
     kb = ReplyKeyboardBuilder()
     kb.button(text="Satılır")
@@ -42,7 +44,17 @@ def get_finish_photo_kb():
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
 
+# "Evlər" düyməsinin dinləyicisi (Sizin dediyiniz açılmayan düymə)
+@router.message(F.text == "🏠 Evlər")
+async def property_menu(message: Message):
+    text = (
+        "🏠 <b>Evlər bölməsi</b>\n\n"
+        "Yeni ev əlavə etmək üçün: /add_property\n"
+        "Aktiv evlərinizi görmək üçün: /my_properties"
+    )
+    await message.answer(text, parse_mode="HTML")
 
+# ======================== EV ƏLAVƏ ETMƏK FSM ========================
 @router.message(Command("add_property"))
 async def start_add_property(message: Message, state: FSMContext):
     await state.set_state(AddPropertyStates.waiting_for_deal_type)
@@ -67,7 +79,7 @@ async def process_property_type(message: Message, state: FSMContext):
     await state.update_data(property_type=ptype)
     
     await state.set_state(AddPropertyStates.waiting_for_title)
-    await message.answer("Yeni əmlak üçün başlıq yazın (Məs: Gənclikdə 3 otaqlı):", reply_markup=get_cancel_menu())
+    await message.answer("Yeni əmlak üçün qısa başlıq yazın (Məs: Gənclikdə 3 otaqlı):", reply_markup=get_cancel_menu())
 
 @router.message(AddPropertyStates.waiting_for_title, F.text)
 async def process_title(message: Message, state: FSMContext):
@@ -134,7 +146,8 @@ async def process_price(message: Message, state: FSMContext):
     await state.update_data(photo_ids=[])
     
     await state.set_state(AddPropertyStates.waiting_for_photos)
-    await message.answer("Əla! İndi mənə əmlakın şəkillərini göndərin.\n\nBütün şəkilləri atıb qurtardıqdan sonra aşağıdakı <b>'✅ Şəkillər bitdi'</b> düyməsini sıxın.", 
+    await message.answer("Əla! İndi mənə əmlakın şəkillərini göndərin (Maks 30 ədəd).\n\n"
+                         "Bütün şəkilləri atıb qurtardıqdan sonra aşağıdakı <b>'✅ Şəkillər bitdi'</b> düyməsini sıxın.", 
                          reply_markup=get_finish_photo_kb(), parse_mode="HTML")
 
 @router.message(AddPropertyStates.waiting_for_photos, F.photo)
@@ -149,7 +162,6 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
     data = await state.get_data()
-    
     photos = data.get("photo_ids", [])
     
     try:
@@ -198,13 +210,14 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
         await message.answer(f"Ev yadda saxlanılarkən xəta baş verdi: {str(e)}")
         await state.clear()
 
-
+# ======================== CALLBACK QUERIES (SİL, STATUS DƏYİŞ) ========================
 @router.callback_query(F.data.startswith("prop_del_"))
 async def delete_property(callback: CallbackQuery, **kwargs):
     db: AsyncSession = kwargs.get("db")
     prop_id = int(callback.data.split("_")[-1])
     await property_repo.delete(db, prop_id)
     await callback.message.edit_text(f"✅ Əmlak (ID: {prop_id}) sistemdən silindi.")
+    await callback.answer("Silindi!")
 
 @router.callback_query(F.data.startswith("prop_status_"))
 async def change_status_menu(callback: CallbackQuery):
