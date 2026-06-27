@@ -38,7 +38,11 @@ async def process_customer_phone(message: Message, state: FSMContext):
     await message.answer("Müştərinin ev axtarışı üçün büdcəsini daxil edin (AZN). Əgər məlum deyilsə '0' yaza bilərsiniz:")
 
 @router.message(AddCustomerStates.waiting_for_budget, F.text)
-async def process_customer_budget(message: Message, state: FSMContext, db: AsyncSession, actor: User):
+async def process_customer_budget(message: Message, state: FSMContext, **kwargs):
+    # kwargs vasitəsilə db və actor obyektlərini alırıq
+    db: AsyncSession = kwargs.get("db")
+    actor: User = kwargs.get("actor")
+    
     try:
         budget = float(message.text.replace(',', '.'))
     except ValueError:
@@ -46,21 +50,25 @@ async def process_customer_budget(message: Message, state: FSMContext, db: Async
         
     data = await state.get_data()
     
-    customer_create = CustomerCreate(
-        full_name=data["full_name"],
-        phone=data["phone"],
-        budget=budget if budget > 0 else None,
-        agent_id=actor.id
-    )
-    
-    customer_obj = await CustomerService.create_customer(db, customer_create, actor)
-    await state.clear()
-    
-    text = (
-        f"✅ <b>Müştəri bazaya əlavə edildi!</b> (ID: {customer_obj.id})\n\n"
-        f"👤 Ad/Soyad: {customer_obj.full_name}\n"
-        f"📞 Telefon: {customer_obj.phone}\n"
-        f"💰 Büdcə: {f'{customer_obj.budget} AZN' if customer_obj.budget else 'Məlum deyil'}"
-    )
-    
-    await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
+    try:
+        customer_create = CustomerCreate(
+            full_name=data["full_name"],
+            phone=data["phone"],
+            budget=budget if budget > 0 else None,
+            agent_id=actor.id
+        )
+        
+        customer_obj = await CustomerService.create_customer(db, customer_create, actor)
+        await state.clear()
+        
+        text = (
+            f"✅ <b>Müştəri bazaya əlavə edildi!</b> (ID: {customer_obj.id})\n\n"
+            f"👤 Ad/Soyad: {customer_obj.full_name}\n"
+            f"📞 Telefon: {customer_obj.phone}\n"
+            f"💰 Büdcə: {f'{customer_obj.budget:,.2f} AZN' if customer_obj.budget else 'Məlum deyil'}"
+        )
+        
+        await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
+    except Exception as e:
+        await message.answer(f"Müştəri yadda saxlanılarkən xəta baş verdi: {str(e)}")
+        await state.clear()
