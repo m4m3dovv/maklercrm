@@ -18,6 +18,9 @@ from app.repositories.property_repo import property_repo
 
 router = Router(name="property_router")
 
+# Media qruplarını izləmək üçün qlobal cache
+media_group_cache = {}
+
 # ======================== MENYULAR ========================
 def get_deal_type_kb():
     kb = ReplyKeyboardBuilder()
@@ -35,13 +38,6 @@ def get_property_type_kb():
     kb.button(text="Obyekt / Ofis")
     kb.button(text="❌ Ləğv et")
     kb.adjust(2, 2, 1)
-    return kb.as_markup(resize_keyboard=True)
-
-def get_finish_photo_kb():
-    kb = ReplyKeyboardBuilder()
-    kb.button(text="✅ Şəkillər Bitdi")
-    kb.button(text="❌ Ləğv et")
-    kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
 
 
@@ -62,7 +58,7 @@ async def start_add_property(message: Message, state: FSMContext):
 
 @router.message(AddPropertyStates.waiting_for_deal_type)
 async def process_deal_type(message: Message, state: FSMContext):
-    deal = DealType.SATIS if "Satılır" in message.text else DealType.KIRAYE
+    deal = DealType.SATIS if message.text and "Satılır" in message.text else DealType.KIRAYE
     await state.update_data(deal_type=deal)
     await state.set_state(AddPropertyStates.waiting_for_property_type)
     await message.answer("Əmlakın növünü seçin:", reply_markup=get_property_type_kb())
@@ -150,52 +146,69 @@ async def process_price(message: Message, state: FSMContext):
     await state.set_state(AddPropertyStates.waiting_for_photos)
     
     await message.answer(
-        "Əla! İndi mənə əmlakın şəkillərini göndərin.\n\n"
-        "Şəkillər yükləndikdən sonra aşağıdakı\n"
-        "<b>'✅ Şəkillər Bitdi'</b> düyməsini sıxın.", 
-        reply_markup=get_finish_photo_kb(), parse_mode="HTML"
+        "Əla! İndi mənə əmlakın şəkillərini göndərin (Maksimum 30 ədəd).\n\n"
+        "Şəkilləri eyni anda seçib göndərə bilərsiniz. Mən bütün şəkilləri alıb bitirdikdən sonra "
+        "avtomatik olaraq bazaya yadda saxlayacağam (Düymə basmağa ehtiyac yoxdur).", 
+        parse_mode="HTML"
     )
 
-# ======================== ŞƏKİLLƏRİN QƏBULU ========================
-@router.message(AddPropertyStates.waiting_for_photos)
+# ======================== ŞƏKİLLƏRİN QƏBULU VƏ AVTOMATİK YADDA SAXLANMASI ========================
+@router.message(AddPropertyStates.waiting_for_photos, F.photo)
 async def collect_and_save_photos(message: Message, state: FSMContext, **kwargs):
-    # Əgər göndərilən şey şəkildirsə: siyahıya atıb gözləyirik (return edirik)
-    if message.photo:
-        data = await state.get_data()
-        photos = data.get("photo_ids", [])
-        photos.append(message.photo[-1].file_id)
-        await state.update_data(photo_ids=photos)
-        return
-
-    # Şəkil deyilsə, fərz edirik ki DÜYMƏYƏ BASILDI (və ya başqa söz yazıldı)
-    # Düymə mətni tam olaraq tutmaq üçün contains istifadə etmirik
-    db: AsyncSession = kwargs.get("db")
-    actor: User = kwargs.get("actor")
-    
     data = await state.get_data()
     photos = data.get("photo_ids", [])
     
+    # Şəkli siyahıya əlavə edirik
+    file_id = message.photo[-1].file_id
+    if file_id not in photos:
+        photos.append(file_id)
+        await state.update_data(photo_ids=photos)
+        
+    # Media Group yoxlaması (Eyni qrupun sonrakı şəkilləri üçün prosesi aşağı buraxmırıq)
+    media_group_id = message.media_group_id
+    if media_group_id:
+        if media_group_id not in media_group_cache:
+            media_group_cache[media_group_id] = True
+        else:
+            return 
+            
+    # GÖZLƏMƏ: Telegram-ın bütün şəkilləri yükləməsini gözləyirik (3 saniyə)
+    await asyncio.sleep(3)
+    
+    # Gözləmədən sonra FSM-dəki ən son vəziyyəti təkrar çəkirik
+    final_data = await state.get_data()
+    final_photos = final_data.get("photo_ids", [])
+    
+    # Təkrar eyni yerə girməmək üçün State-i təmizləyirik
+    current_state = await state.get_state()
+    if current_state != AddPropertyStates.waiting_for_photos.state:
+        return
+        
+    await state.clear()
+    
+    db: AsyncSession = kwargs.get("db")
+    actor: User = kwargs.get("actor")
+    
     try:
         prop_create = PropertyCreate(
-            title=data.get("title", "Başlıqsız"),
-            property_type=data.get("property_type", PropertyType.BINA_EVI),
-            deal_type=data.get("deal_type", DealType.SATIS),
-            district=data.get("district", "-"),
-            address=data.get("address", "-"),
-            room_count=data.get("room_count", 0),
-            floor=data.get("floor", 1),
-            total_floors=data.get("total_floors", 1),
-            area=data.get("area", 0.0),
-            document_type=data.get("document_type", "-"),
-            owner_phone=data.get("owner_phone", "-"),
-            price=data.get("price", 0.0),
-            images=json.dumps(photos) if photos else None,
+            title=final_data.get("title", "Başlıqsız"),
+            property_type=final_data.get("property_type", PropertyType.BINA_EVI),
+            deal_type=final_data.get("deal_type", DealType.SATIS),
+            district=final_data.get("district", "-"),
+            address=final_data.get("address", "-"),
+            room_count=final_data.get("room_count", 0),
+            floor=final_data.get("floor", 1),
+            total_floors=final_data.get("total_floors", 1),
+            area=final_data.get("area", 0.0),
+            document_type=final_data.get("document_type", "-"),
+            owner_phone=final_data.get("owner_phone", "-"),
+            price=final_data.get("price", 0.0),
+            images=json.dumps(final_photos) if final_photos else None,
             agent_id=actor.id,
             status=PropertyStatus.ACTIVE
         )
         
         property_obj = await PropertyService.create_property(db, prop_create, actor)
-        await state.clear()
         
         text = (
             f"✅ <b>Əmlak uğurla bazaya əlavə edildi!</b> (ID: {property_obj.id})\n\n"
@@ -207,11 +220,11 @@ async def collect_and_save_photos(message: Message, state: FSMContext, **kwargs)
             f"📄 Sənəd: {property_obj.document_type}\n"
             f"📞 Sahib: {property_obj.owner_phone}\n"
             f"💰 Qiymət: <b>{property_obj.price:,.2f} AZN</b>\n"
-            f"📸 Yüklənən şəkil sayı: {len(photos)}"
+            f"📸 Yüklənən şəkil sayı: {len(final_photos)}"
         )
         
-        if photos:
-            await message.answer_photo(photos[0], caption=text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
+        if final_photos:
+            await message.answer_photo(final_photos[0], caption=text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
         else:
             await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
             
@@ -219,7 +232,6 @@ async def collect_and_save_photos(message: Message, state: FSMContext, **kwargs)
         
     except Exception as e:
         await message.answer(f"Ev yadda saxlanılarkən xəta baş verdi: {str(e)}")
-        await state.clear()
 
 
 # ======================== CALLBACK QUERIES (SİL, STATUS DƏYİŞ) ========================
