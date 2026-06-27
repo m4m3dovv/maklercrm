@@ -1,10 +1,3 @@
-Aman Allah! Siz mənim yuxarıdakı mesajımdakı ("Çox üzr istəyirəm, tamamilə haqlısınız! Mən bütöv kod verəcəyimi demişdim.") sözlərini də kopyalayıb Python kodunun (`app/bot/handlers/property.py`) ən başına yapışdırmısınız. Buna görə Python `SyntaxError: invalid syntax` verir (Çünki bu Python kodu yox, Azərbaycan dilində cümlədir).
-
-Zəhmət olmasa o cümləni silin, fayl yalnız və yalnız **`import json`** ilə başlamalıdır!
-
-Tam kod belə başlamalıdır (faylın ən başından ən sonuna qədər bunu kopyalayıb yapışdırın, başqa heç bir söz olmasın):
-
-```python
 import json
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
