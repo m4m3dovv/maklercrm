@@ -1,4 +1,5 @@
 import json
+import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -201,7 +202,7 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
             f"✅ <b>Əmlak uğurla bazaya əlavə edildi!</b> (ID: {property_obj.id})\n\n"
             f"🏷 <b>{property_obj.deal_type.value}</b> - {property_obj.property_type.value}\n"
             f"📌 {property_obj.title}\n"
-            f"📍 {property_obj.district}, {property_obj.address}\n"
+            f"📍 Ünvan: {property_obj.district}, {property_obj.address}\n"
             f"🚪 Otaq: {property_obj.room_count} | 📐 Sahə: {property_obj.area} kv.m\n"
             f"🏢 Mərtəbə: {property_obj.floor} / {property_obj.total_floors}\n"
             f"📄 Sənəd: {property_obj.document_type}\n"
@@ -222,7 +223,7 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
         await state.clear()
 
 
-# ======================== MƏNİM EVLƏRİM (/my_properties) ========================
+# ======================== MƏNİM EVLƏRİM (/my_properties) TAM DETALLI ========================
 @router.message(Command("my_properties"))
 async def show_my_properties(message: Message, **kwargs):
     db: AsyncSession = kwargs.get("db")
@@ -236,12 +237,17 @@ async def show_my_properties(message: Message, **kwargs):
     await message.answer(f"Sizin ümumi <b>{len(properties)}</b> elanınız var. Aşağıda siyahısı verilmişdir:", parse_mode="HTML")
     
     for prop in properties:
+        # BÜTÜN DETALLARI EKRANA ÇIXARIRIQ
         text = (
-            f"📌 <b>{prop.title}</b>\n"
-            f"🏷 {prop.deal_type.value} - {prop.property_type.value}\n"
+            f"📌 <b>{prop.title}</b> (ID: {prop.id})\n"
+            f"🏷 <b>{prop.deal_type.value}</b> - {prop.property_type.value}\n"
             f"📍 {prop.district}, {prop.address}\n"
-            f"💰 Qiymət: {prop.price:,.2f} AZN\n"
-            f"📊 Status: {prop.status.value.upper()}"
+            f"🚪 Otaq: {prop.room_count} | 📐 Sahə: {prop.area} kv.m\n"
+            f"🏢 Mərtəbə: {prop.floor} / {prop.total_floors}\n"
+            f"📄 Sənəd: {prop.document_type}\n"
+            f"📞 Sahib: <code>{prop.owner_phone}</code>\n"
+            f"💰 Qiymət: <b>{prop.price:,.2f} AZN</b>\n"
+            f"📊 Status: <b>{prop.status.value.upper()}</b>"
         )
         
         if prop.images:
