@@ -4,13 +4,11 @@ from sqlalchemy import String, Integer, Float, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, TimestampMixin
 
-
 class PropertyStatus(str, Enum):
-    ACTIVE = "active"          # Aktiv
-    RESERVED = "reserved"      # Rezerv edildi
-    RENTED = "rented"          # Kirayə verildi
-    SOLD = "sold"              # Satıldı
-
+    ACTIVE = "active"          
+    RESERVED = "reserved"      
+    RENTED = "rented"          
+    SOLD = "sold"              
 
 class Property(Base, TimestampMixin):
     __tablename__ = "properties"
@@ -22,7 +20,7 @@ class Property(Base, TimestampMixin):
     price: Mapped[float] = mapped_column(Float, index=True, nullable=False)
     room_count: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     floor: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    area: Mapped[float] = mapped_column(Float, nullable=False) # Kvadrat metr
+    area: Mapped[float] = mapped_column(Float, nullable=False)
     
     district: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
     settlement: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -31,7 +29,6 @@ class Property(Base, TimestampMixin):
     latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     
-    # JSON sütunları - şəkil və video linklərini və ya fayl ID-lərini saxlamaq üçün
     images: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     video: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
@@ -39,10 +36,8 @@ class Property(Base, TimestampMixin):
         default=PropertyStatus.ACTIVE, index=True, nullable=False
     )
     
-    # Foreign Key (Evi idarə edən agent)
     agent_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     
-    # Əlaqələr
     agent: Mapped["User"] = relationship("User", back_populates="properties")
     interested_customers: Mapped[List["Customer"]] = relationship(
         "Customer", secondary="customer_property_association", back_populates="interested_properties"
