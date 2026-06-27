@@ -286,4 +286,3 @@ async def set_property_status(callback: CallbackQuery, **kwargs):
         await callback.message.edit_text(f"✅ Əmlakın statusu dəyişdirildi: <b>{new_status.upper()}</b>", parse_mode="HTML")
     except Exception as e:
         await callback.answer(f"Xəta: {e}", show_alert=True)
-```
