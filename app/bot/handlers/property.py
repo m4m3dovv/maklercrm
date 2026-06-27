@@ -1,4 +1,5 @@
 import json
+import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -158,22 +159,19 @@ async def process_price(message: Message, state: FSMContext):
     except ValueError:
         return await message.answer("Xahiş olunur, düzgün məbləğ daxil edin:")
         
-    await state.update_data(price=price)
-    
-    # Şəkilləri yığmaq üçün əvvəlcədən boş siyahı yaradırıq
-    await state.update_data(photo_ids=[])
-    
+    await state.update_data(price=price, photo_ids=[]) # Şəkil siyahısını yaradırıq
     await state.set_state(AddPropertyStates.waiting_for_photos)
-    await message.answer("Əla! İndi mənə əmlakın şəkillərini göndərin (Maksimum 30 ədəd).\n\n"
-                         "<b>DİQQƏT:</b> Bütün şəkillər yüklənib bitdikdən sonra aşağıdakı\n"
-                         "<b>'✅ Şəkillər bitdi'</b> düyməsini sıxın.", 
-                         reply_markup=get_finish_photo_kb(), parse_mode="HTML")
+    
+    await message.answer(
+        "Əla! İndi mənə əmlakın şəkillərini göndərin (Maksimum 30 ədəd).\n\n"
+        "Bütün şəkillər yüklənib bitdikdən sonra aşağıdakı\n"
+        "<b>'✅ Şəkillər bitdi (Yadda saxla)'</b> düyməsini sıxın.", 
+        reply_markup=get_finish_photo_kb(), parse_mode="HTML"
+    )
 
-
-# ======================== ŞƏKİLLƏRİN QƏBULU ========================
+# ŞƏKİLLƏRİN QƏBULU
 @router.message(AddPropertyStates.waiting_for_photos, F.photo)
 async def collect_photos(message: Message, state: FSMContext):
-    # Çoxlu şəkil atanda xəta olmasın deyə diqqətlə listə əlavə edirik
     data = await state.get_data()
     photos = data.get("photo_ids", [])
     
@@ -181,31 +179,36 @@ async def collect_photos(message: Message, state: FSMContext):
     if file_id not in photos:
         photos.append(file_id)
         await state.update_data(photo_ids=photos)
-
-
-# "Şəkillər Bitdi" düyməsinə basıldıqda bazaya yazırıq
-@router.message(AddPropertyStates.waiting_for_photos, F.text.contains("bitdi"))
+        
+# ŞƏKİL GÖZLƏNİLƏRKƏN DÜYMƏYƏ VƏ YA MƏTNƏ REAKSİYA
+@router.message(AddPropertyStates.waiting_for_photos)
 async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
+    # Əgər düymənin özü deyilsə xəbərdarlıq edirik.
+    if message.text != "✅ Şəkillər bitdi (Yadda saxla)":
+        return await message.answer("Xahiş olunur, yalnız şəkil göndərin və ya aşağıdakı '✅ Şəkillər bitdi' düyməsini sıxın.")
+        
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
-    data = await state.get_data()
     
+    # 1 saniyə gözləyirik ki Telegramdan bütün şəkillər axıb yığılsın
+    await asyncio.sleep(1)
+    
+    data = await state.get_data()
     photos = data.get("photo_ids", [])
     
     try:
-        # Bazaya yazmaq üçün DTO hazırlayırıq
         prop_create = PropertyCreate(
             title=data.get("title", "Başlıqsız"),
             property_type=data.get("property_type", PropertyType.BINA_EVI),
             deal_type=data.get("deal_type", DealType.SATIS),
-            district=data.get("district", "Qeyd edilməyib"),
-            address=data.get("address", "Qeyd edilməyib"),
+            district=data.get("district", "-"),
+            address=data.get("address", "-"),
             room_count=data.get("room_count", 0),
             floor=data.get("floor", 1),
             total_floors=data.get("total_floors", 1),
             area=data.get("area", 0.0),
-            document_type=data.get("document_type", "Qeyd edilməyib"),
-            owner_phone=data.get("owner_phone", "Qeyd edilməyib"),
+            document_type=data.get("document_type", "-"),
+            owner_phone=data.get("owner_phone", "-"),
             price=data.get("price", 0.0),
             images=json.dumps(photos) if photos else None,
             agent_id=actor.id,
@@ -219,7 +222,7 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
             f"✅ <b>Əmlak uğurla bazaya əlavə edildi!</b> (ID: {property_obj.id})\n\n"
             f"🏷 <b>{property_obj.deal_type.value}</b> - {property_obj.property_type.value}\n"
             f"📌 {property_obj.title}\n"
-            f"📍 Ünvan: {property_obj.district}, {property_obj.address}\n"
+            f"📍 {property_obj.district}, {property_obj.address}\n"
             f"🚪 Otaq: {property_obj.room_count} | 📐 Sahə: {property_obj.area} kv.m\n"
             f"🏢 Mərtəbə: {property_obj.floor} / {property_obj.total_floors}\n"
             f"📄 Sənəd: {property_obj.document_type}\n"
@@ -233,7 +236,7 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
         else:
             await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
             
-        await message.answer("Əmlakı idarə etmək üçün aşağıdakı düymələrdən istifadə edin:", reply_markup=property_actions_kb(property_obj.id))
+        await message.answer("Əmlakı idarə etmək üçün:", reply_markup=property_actions_kb(property_obj.id))
         
     except Exception as e:
         await message.answer(f"Ev yadda saxlanılarkən xəta baş verdi: {str(e)}")
