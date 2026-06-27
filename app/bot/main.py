@@ -17,6 +17,16 @@ from app.bot.handlers.admin import router as admin_router
 from app.bot.middlewares.db import DbSessionMiddleware
 from app.bot.middlewares.auth import AuthMiddleware
 
+# Database
+from app.database.session import engine
+from app.database.base import Base
+
+# Bütün modelləri import edirik ki, Base.metadata onları görsün
+from app.models.user import User
+from app.models.property import Property
+from app.models.customer import Customer
+from app.models.audit import AuditLog
+
 # Logging formatı
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -24,7 +34,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def init_models():
+    """Verilənlər bazasında cədvəlləri avtomatik yaradır (əgər yoxdursa)"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
 async def main():
+    logger.info("Cədvəllər yoxlanılır və yaradılır...")
+    try:
+        await init_models()
+        logger.info("Cədvəllər uğurla yoxlanıldı!")
+    except Exception as e:
+        logger.error(f"Cədvəl yaratmada xəta: {e}")
+
     logger.info("Bot işə düşür...")
     
     # Bot yaradılması
@@ -48,6 +70,8 @@ async def main():
     
     # Start polling
     try:
+        # Əgər webhook qalıbsa, təmizləyirik ki polling işləyə bilsin
+        await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except Exception as e:
         logger.error(f"Bot xətası: {e}")
