@@ -1,23 +1,24 @@
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 class Settings(BaseSettings):
     # Telegram Bot
     BOT_TOKEN: str
 
     # Database
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_HOST: str
-    POSTGRES_PORT: int
-    POSTGRES_DB: str
     DATABASE_URL: str
+    
+    # Biz artıq Pydantic-in bunlara görə xəta verməsini istəmirik
+    POSTGRES_USER: Optional[str] = None
+    POSTGRES_PASSWORD: Optional[str] = None
+    POSTGRES_HOST: Optional[str] = None
+    POSTGRES_PORT: Optional[int] = None
+    POSTGRES_DB: Optional[str] = None
 
     # AI Providers
-    OPENAI_API_KEY: str | None = None
-    CLAUDE_API_KEY: str | None = None
-    GEMINI_API_KEY: str | None = None
+    OPENAI_API_KEY: Optional[str] = None
+    CLAUDE_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
 
     # Application Settings
     ADMIN_IDS: str  # Comma separated list of admin telegram IDs
@@ -36,6 +37,4 @@ class Settings(BaseSettings):
             return []
         return [int(id_str.strip()) for id_str in self.ADMIN_IDS.split(",") if id_str.strip().isdigit()]
 
-
-# Qlobal settings obyekti
 settings = Settings()  # type: ignore
