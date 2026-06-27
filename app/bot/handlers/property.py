@@ -1,4 +1,10 @@
+Çox üzr istəyirəm, tamamilə haqlısınız! Mən bütöv kod verəcəyimi demişdim. 
+
+Aşağıdakı **BÜTÖV** kodu **`app/bot/handlers/property.py`** faylına yapışdırın (əvvəlkiləri silin):
+
+```python
 import json
+import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -38,7 +44,7 @@ def get_property_type_kb():
 
 def get_finish_photo_kb():
     kb = ReplyKeyboardBuilder()
-    kb.button(text="✅ Şəkillər bitdi (Yadda saxla)")
+    kb.button(text="✅ Şəkillər Bitdi")
     kb.button(text="❌ Ləğv et")
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
@@ -145,57 +151,70 @@ async def process_price(message: Message, state: FSMContext):
     except (ValueError, AttributeError):
         return await message.answer("Xahiş olunur, düzgün məbləğ daxil edin:")
         
-    await state.update_data(price=price)
-    await state.update_data(photo_ids=[])
-    
+    await state.update_data(price=price, photo_ids=[])
     await state.set_state(AddPropertyStates.waiting_for_photos)
+    
     await message.answer(
-        "Əla! İndi mənə əmlakın şəkillərini göndərin.\n\n"
-        "Bütün şəkilləri göndərdikdən sonra <b>AŞAĞIDAKI DÜYMƏNİ</b> sıxın:", 
-        reply_markup=get_finish_photo_kb(), parse_mode="HTML"
+        "Əla! İndi mənə əmlakın şəkillərini göndərin (Maksimum 30 ədəd).\n\n"
+        "Şəkilləri eyni anda seçib göndərə bilərsiniz. Mən bütün şəkilləri alıb bitirdikdən sonra "
+        "avtomatik olaraq bazaya yadda saxlayacağam (Düymə basmağa ehtiyac yoxdur).", 
+        parse_mode="HTML"
     )
 
-# ŞƏKİLLƏRİ QƏBUL EDİRİK
+# ŞƏKİLLƏRİN QƏBULU VƏ AVTOMATİK YADDA SAXLANMASI
+media_group_cache = {}
+
 @router.message(AddPropertyStates.waiting_for_photos, F.photo)
-async def collect_photos(message: Message, state: FSMContext):
+async def collect_and_save_photos(message: Message, state: FSMContext, **kwargs):
     data = await state.get_data()
     photos = data.get("photo_ids", [])
-    photos.append(message.photo[-1].file_id)
-    await state.update_data(photo_ids=photos)
-
-
-# DÜYMƏYƏ BASILDIQDA İŞLƏYƏCƏK KOD
-@router.message(AddPropertyStates.waiting_for_photos, F.text == "✅ Şəkillər bitdi (Yadda saxla)")
-async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
-    await message.answer("Sistemə yazılır, zəhmət olmasa gözləyin... ⏳")
+    
+    file_id = message.photo[-1].file_id
+    if file_id not in photos:
+        photos.append(file_id)
+        await state.update_data(photo_ids=photos)
+        
+    media_group_id = message.media_group_id
+    if media_group_id:
+        if media_group_id not in media_group_cache:
+            media_group_cache[media_group_id] = True
+        else:
+            return 
+            
+    await asyncio.sleep(3)
+    
+    final_data = await state.get_data()
+    final_photos = final_data.get("photo_ids", [])
+    
+    current_state = await state.get_state()
+    if current_state != AddPropertyStates.waiting_for_photos.state:
+        return
+        
+    await state.clear()
     
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
     
-    data = await state.get_data()
-    photos = data.get("photo_ids", [])
-    
     try:
         prop_create = PropertyCreate(
-            title=data.get("title", "Başlıqsız"),
-            property_type=data.get("property_type", PropertyType.BINA_EVI),
-            deal_type=data.get("deal_type", DealType.SATIS),
-            district=data.get("district", "-"),
-            address=data.get("address", "-"),
-            room_count=data.get("room_count", 0),
-            floor=data.get("floor", 1),
-            total_floors=data.get("total_floors", 1),
-            area=data.get("area", 0.0),
-            document_type=data.get("document_type", "-"),
-            owner_phone=data.get("owner_phone", "-"),
-            price=data.get("price", 0.0),
-            images=json.dumps(photos) if photos else None,
+            title=final_data.get("title", "Başlıqsız"),
+            property_type=final_data.get("property_type", PropertyType.BINA_EVI),
+            deal_type=final_data.get("deal_type", DealType.SATIS),
+            district=final_data.get("district", "-"),
+            address=final_data.get("address", "-"),
+            room_count=final_data.get("room_count", 0),
+            floor=final_data.get("floor", 1),
+            total_floors=final_data.get("total_floors", 1),
+            area=final_data.get("area", 0.0),
+            document_type=final_data.get("document_type", "-"),
+            owner_phone=final_data.get("owner_phone", "-"),
+            price=final_data.get("price", 0.0),
+            images=json.dumps(final_photos) if final_photos else None,
             agent_id=actor.id,
             status=PropertyStatus.ACTIVE
         )
         
         property_obj = await PropertyService.create_property(db, prop_create, actor)
-        await state.clear()
         
         text = (
             f"✅ <b>Əmlak uğurla bazaya əlavə edildi!</b> (ID: {property_obj.id})\n\n"
@@ -207,11 +226,11 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
             f"📄 Sənəd: {property_obj.document_type}\n"
             f"📞 Sahib: {property_obj.owner_phone}\n"
             f"💰 Qiymət: <b>{property_obj.price:,.2f} AZN</b>\n"
-            f"📸 Yüklənən şəkil sayı: {len(photos)}"
+            f"📸 Yüklənən şəkil sayı: {len(final_photos)}"
         )
         
-        if photos:
-            await message.answer_photo(photos[0], caption=text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
+        if final_photos:
+            await message.answer_photo(final_photos[0], caption=text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
         else:
             await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu(actor.role))
             
@@ -219,7 +238,39 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
         
     except Exception as e:
         await message.answer(f"Ev yadda saxlanılarkən xəta baş verdi: {str(e)}")
-        await state.clear()
+
+# ======================== MƏNİM EVLƏRİM (/my_properties) ========================
+@router.message(Command("my_properties"))
+async def show_my_properties(message: Message, **kwargs):
+    db: AsyncSession = kwargs.get("db")
+    actor: User = kwargs.get("actor")
+    
+    properties = await property_repo.get_by_agent(db, agent_id=actor.id, skip=0, limit=20)
+    
+    if not properties:
+        return await message.answer("Sizin hələ heç bir aktiv əmlak elanınız yoxdur.\nYeni ev əlavə etmək üçün: /add_property")
+        
+    await message.answer(f"Sizin ümumi <b>{len(properties)}</b> elanınız var. Aşağıda siyahısı verilmişdir:", parse_mode="HTML")
+    
+    for prop in properties:
+        text = (
+            f"📌 <b>{prop.title}</b>\n"
+            f"🏷 {prop.deal_type.value} - {prop.property_type.value}\n"
+            f"📍 {prop.district}, {prop.address}\n"
+            f"💰 Qiymət: {prop.price:,.2f} AZN\n"
+            f"📊 Status: {prop.status.value.upper()}"
+        )
+        
+        if prop.images:
+            try:
+                photos = json.loads(prop.images)
+                if photos and len(photos) > 0:
+                    await message.answer_photo(photos[0], caption=text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
+                    continue
+            except Exception:
+                pass
+                
+        await message.answer(text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
 
 
 # ======================== CALLBACK QUERIES ========================
@@ -231,24 +282,21 @@ async def delete_property(callback: CallbackQuery, **kwargs):
     await callback.message.edit_text(f"✅ Əmlak (ID: {prop_id}) sistemdən tamamilə silindi.")
     await callback.answer("Silindi!")
 
-
 @router.callback_query(F.data.startswith("prop_status_"))
 async def change_status_menu(callback: CallbackQuery):
     prop_id = int(callback.data.split("_")[-1])
     await callback.message.edit_reply_markup(reply_markup=property_status_kb(prop_id))
 
-
 @router.callback_query(F.data.startswith("set_status_"))
 async def set_property_status(callback: CallbackQuery, **kwargs):
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
-    
     parts = callback.data.split("_")
     prop_id = int(parts[2])
     new_status = parts[3]
-    
     try:
         await PropertyService.change_status(db, prop_id, PropertyStatus(new_status), actor)
         await callback.message.edit_text(f"✅ Əmlakın statusu dəyişdirildi: <b>{new_status.upper()}</b>", parse_mode="HTML")
     except Exception as e:
         await callback.answer(f"Xəta: {e}", show_alert=True)
+```
