@@ -1,10 +1,10 @@
 import json
 import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -18,7 +18,6 @@ from app.models.property import Property, PropertyStatus, PropertyType, DealType
 from app.repositories.property_repo import property_repo
 
 router = Router(name="property_router")
-
 
 # ======================== MENYULAR ========================
 def get_deal_type_kb():
@@ -46,6 +45,7 @@ def get_finish_photo_kb():
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
 
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 def get_property_categories_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Yeni Əmlak Əlavə Et", callback_data="add_property_action")
@@ -237,6 +237,11 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
 
 
 # ======================== KATEQORİYALARLA EV AXTARIŞI ========================
+@router.message(Command("my_properties"))
+async def my_properties_cmd(message: Message):
+    text = "Aşağıdakı kateqoriyalardan birini seçin:"
+    await message.answer(text, parse_mode="HTML", reply_markup=get_property_categories_kb())
+
 @router.callback_query(F.data.startswith("my_props_"))
 async def show_properties_by_category(callback: CallbackQuery, **kwargs):
     db: AsyncSession = kwargs.get("db")
@@ -285,7 +290,7 @@ async def show_properties_by_category(callback: CallbackQuery, **kwargs):
         
         if prop.images:
             try:
-                photos = json.loads(prop.images)
+                photos = json.dumps(prop.images) if isinstance(prop.images, list) else json.loads(prop.images)
                 if photos and len(photos) > 0:
                     await callback.message.answer_photo(photos[0], caption=text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
                     continue
@@ -302,14 +307,11 @@ async def delete_property(callback: CallbackQuery, **kwargs):
     prop_id = int(callback.data.split("_")[-1])
     await property_repo.delete(db, prop_id)
     await callback.message.edit_text(f"✅ Əmlak (ID: {prop_id}) sistemdən tamamilə silindi.")
-    await callback.answer("Silindi!")
-
 
 @router.callback_query(F.data.startswith("prop_status_"))
 async def change_status_menu(callback: CallbackQuery):
     prop_id = int(callback.data.split("_")[-1])
     await callback.message.edit_reply_markup(reply_markup=property_status_kb(prop_id))
-
 
 @router.callback_query(F.data.startswith("set_status_"))
 async def set_property_status(callback: CallbackQuery, **kwargs):
@@ -321,8 +323,19 @@ async def set_property_status(callback: CallbackQuery, **kwargs):
     new_status = parts[3]
     
     try:
-        await PropertyService.change_status(db, prop_id, PropertyStatus(new_status), actor)
-        await callback.message.edit_text(f"✅ Əmlakın statusu dəyişdirildi: <b>{new_status.upper()}</b>", parse_mode="HTML")
+        await PropertyService.change_status(db, prop_id, new_status, actor)
+        
+        status_text = {
+            "active": "AKTİV 🟢",
+            "reserved": "REZERV 🟡",
+            "rented": "KİRAYƏ VERİLDİ 🔵",
+            "sold": "SATILDI 🔴"
+        }
+        await callback.message.edit_text(
+            f"✅ Əmlakın statusu uğurla dəyişdirildi: <b>{status_text.get(new_status, new_status.upper())}</b>\n\n"
+            f"<i>Geri qayıtmaq üçün yuxarıdakı menyudan istifadə edin.</i>", 
+            parse_mode="HTML"
+        )
     except Exception as e:
         await callback.answer(f"Xəta: {e}", show_alert=True)
 
