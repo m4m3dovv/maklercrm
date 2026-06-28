@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -45,29 +45,36 @@ def get_finish_photo_kb():
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
 
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-def get_property_categories_kb():
+# İLK KATEQORİYA SEÇİMİ (SATILIQ VƏ YA KİRAYƏ)
+def get_deal_categories_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Yeni Əmlak Əlavə Et", callback_data="add_property_action")
-    kb.button(text="🏢 Bina evlərim", callback_data="my_props_bina")
-    kb.button(text="🏡 Həyət evlərim", callback_data="my_props_heyet")
-    kb.button(text="🌍 Torpaq sahələrim", callback_data="my_props_torpaq")
-    kb.button(text="🏢 Obyektlərim", callback_data="my_props_obyekt")
-    kb.button(text="📋 Bütün Əmlaklarım", callback_data="my_props_all")
-    kb.adjust(1, 2, 2, 1)
+    kb.button(text="💰 Satılıq Əmlaklar", callback_data="deal_satis")
+    kb.button(text="🔑 Kirayə Əmlaklar", callback_data="deal_kiraye")
+    kb.button(text="📋 Bütün Əmlaklarım", callback_data="my_props_all_all")
+    kb.adjust(2, 1)
     return kb.as_markup()
+
+# İKİNCİ KATEQORİYA SEÇİMİ (BİNA, HƏYƏT...) - Seçilən təyinata (deal) görə formalaşır
+def get_property_categories_kb(deal_slug: str):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏢 Bina evləri", callback_data=f"my_props_{deal_slug}_bina")
+    kb.button(text="🏡 Həyət evləri", callback_data=f"my_props_{deal_slug}_heyet")
+    kb.button(text="🌍 Torpaq sahələri", callback_data=f"my_props_{deal_slug}_torpaq")
+    kb.button(text="🏢 Obyektlər", callback_data=f"my_props_{deal_slug}_obyekt")
+    kb.button(text="⬅️ Geri qayıt", callback_data="back_to_deal_cats")
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
 
 # ======================== EVLƏR BÖLMƏSİ ========================
 @router.message(F.text == "🏠 Evlər")
 async def property_menu(message: Message):
-    text = "🏠 <b>Əmlak İdarəetmə Paneli</b>\n\nAşağıdakı kateqoriyalardan birini seçin:"
-    await message.answer(text, parse_mode="HTML", reply_markup=get_property_categories_kb())
-
-@router.callback_query(F.data == "add_property_action")
-async def action_add_property(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AddPropertyStates.waiting_for_deal_type)
-    await callback.message.answer("Əmlak satılır, yoxsa kirayə verilir?", reply_markup=get_deal_type_kb())
-    await callback.answer()
+    text = (
+        "🏠 <b>Evlər bölməsi</b>\n\n"
+        "Yeni ev əlavə etmək üçün: /add_property\n"
+        "Aktiv evlərinizi görmək üçün: /my_properties"
+    )
+    await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("add_property"))
 async def start_add_property(message: Message, state: FSMContext):
@@ -166,8 +173,7 @@ async def process_price(message: Message, state: FSMContext):
     await state.set_state(AddPropertyStates.waiting_for_photos)
     await message.answer(
         "Əla! İndi mənə əmlakın şəkillərini göndərin.\n\n"
-        "Bütün şəkilləri (tək-tək və ya qrup halında) göndərdikdən sonra "
-        "MÜTLƏQ aşağıdakı düyməni sıxın ki, bazaya yadda saxlanılsın:", 
+        "Bütün şəkilləri göndərdikdən sonra <b>AŞAĞIDAKI DÜYMƏNİ</b> sıxın:", 
         reply_markup=get_finish_photo_kb(), parse_mode="HTML"
     )
 
@@ -236,33 +242,64 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
         await state.clear()
 
 
-# ======================== KATEQORİYALARLA EV AXTARIŞI ========================
+# ======================== MƏNİM EVLƏRİM (KATEQORİYALARLA) ========================
 @router.message(Command("my_properties"))
 async def my_properties_cmd(message: Message):
-    text = "Aşağıdakı kateqoriyalardan birini seçin:"
-    await message.answer(text, parse_mode="HTML", reply_markup=get_property_categories_kb())
+    text = "🏠 <b>Aktiv Elanlarım</b>\n\nZəhmət olmasa əmlakın təyinatını seçin:"
+    await message.answer(text, parse_mode="HTML", reply_markup=get_deal_categories_kb())
 
+@router.callback_query(F.data == "back_to_deal_cats")
+async def go_back_to_deals(callback: CallbackQuery):
+    text = "🏠 <b>Aktiv Elanlarım</b>\n\nZəhmət olmasa əmlakın təyinatını seçin:"
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_deal_categories_kb())
+
+@router.callback_query(F.data.startswith("deal_"))
+async def select_property_type_for_deal(callback: CallbackQuery):
+    deal_slug = callback.data.split("_")[1] # 'satis' və ya 'kiraye'
+    deal_name = "Satılıq" if deal_slug == "satis" else "Kirayə"
+    
+    text = f"🔑 <b>{deal_name} Əmlaklarım</b>\n\nAşağıdakı kateqoriyalardan birini seçin:"
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_property_categories_kb(deal_slug))
+
+
+# Həm Təyinat (deal), həm də Kateqoriyaya görə axtarış
 @router.callback_query(F.data.startswith("my_props_"))
 async def show_properties_by_category(callback: CallbackQuery, **kwargs):
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
-    category_slug = callback.data.split("_")[2]
+    
+    parts = callback.data.split("_")
+    deal_slug = parts[2] # 'satis', 'kiraye' və ya 'all'
+    category_slug = parts[3] # 'bina', 'heyet' və s.
     
     stmt = select(Property).where(Property.agent_id == actor.id)
     cat_name = "Bütün Əmlaklarım"
     
+    # 1. Satılıq/Kirayə filtri
+    if deal_slug == "satis":
+        stmt = stmt.where(Property.deal_type == DealType.SATIS)
+        cat_name = "Satılıq "
+    elif deal_slug == "kiraye":
+        stmt = stmt.where(Property.deal_type == DealType.KIRAYE)
+        cat_name = "Kirayə "
+    else:
+        cat_name = ""
+        
+    # 2. Bina/Həyət filtri
     if category_slug == "bina":
         stmt = stmt.where(Property.property_type == PropertyType.BINA_EVI)
-        cat_name = "🏢 Bina Evləri"
+        cat_name += "Bina Evləri"
     elif category_slug == "heyet":
         stmt = stmt.where(Property.property_type == PropertyType.HEYET_EVI)
-        cat_name = "🏡 Həyət / Bağ Evləri"
+        cat_name += "Həyət / Bağ Evləri"
     elif category_slug == "torpaq":
         stmt = stmt.where(Property.property_type == PropertyType.TORPAQ)
-        cat_name = "🌍 Torpaq Sahələri"
+        cat_name += "Torpaq Sahələri"
     elif category_slug == "obyekt":
         stmt = stmt.where(Property.property_type == PropertyType.OBYEKT)
-        cat_name = "🏢 Obyekt / Ofis"
+        cat_name += "Obyekt / Ofis"
+    else:
+        cat_name = "Bütün Əmlaklarım"
         
     stmt = stmt.limit(30)
     result = await db.execute(stmt)
@@ -308,10 +345,12 @@ async def delete_property(callback: CallbackQuery, **kwargs):
     await property_repo.delete(db, prop_id)
     await callback.message.edit_text(f"✅ Əmlak (ID: {prop_id}) sistemdən tamamilə silindi.")
 
+
 @router.callback_query(F.data.startswith("prop_status_"))
 async def change_status_menu(callback: CallbackQuery):
     prop_id = int(callback.data.split("_")[-1])
     await callback.message.edit_reply_markup(reply_markup=property_status_kb(prop_id))
+
 
 @router.callback_query(F.data.startswith("set_status_"))
 async def set_property_status(callback: CallbackQuery, **kwargs):
