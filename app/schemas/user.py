@@ -1,52 +1,32 @@
-from enum import Enum
-from typing import List, Optional
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional
 from datetime import datetime
-from sqlalchemy import String, Boolean, BigInteger, DateTime
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.database.base import Base, TimestampMixin
+from app.models.user import UserRole, SubscriptionType
 
-class UserRole(str, Enum):
-    ADMIN = "admin"
-    MANAGER = "manager"
-    AGENT = "agent"
+class UserBase(BaseModel):
+    telegram_id: int
+    full_name: str = Field(..., max_length=100)
+    username: Optional[str] = Field(None, max_length=50)
+    phone: Optional[str] = Field(None, max_length=20)
+    role: UserRole = UserRole.AGENT
+    subscription: SubscriptionType = SubscriptionType.NONE
+    subscription_end: Optional[datetime] = None
+    is_active: bool = True
 
-class SubscriptionType(str, Enum):
-    NONE = "none"           # Ödəniş etməyib
-    STANDART = "standart"   # 15 AZN paketi
-    PREMIUM = "premium"     # 30 AZN paketi
+class UserCreate(UserBase):
+    pass
 
-class User(Base, TimestampMixin):
-    __tablename__ = "users"
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = Field(None, max_length=20)
+    role: Optional[UserRole] = None
+    subscription: Optional[SubscriptionType] = None
+    subscription_end: Optional[datetime] = None
+    is_active: Optional[bool] = None
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
-    full_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    username: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    role: Mapped[UserRole] = mapped_column(default=UserRole.AGENT, nullable=False)
-    
-    # Abunəlik sistemi üçün yeni sahələr
-    subscription: Mapped[SubscriptionType] = mapped_column(default=SubscriptionType.NONE, nullable=False)
-    subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+class UserResponse(UserBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
 
-    # Əlaqələr
-    properties: Mapped[List["Property"]] = relationship(
-        "Property", back_populates="agent", cascade="all, delete-orphan"
-    )
-    customers: Mapped[List["Customer"]] = relationship(
-        "Customer", back_populates="agent", cascade="all, delete-orphan"
-    )
-
-    def is_subscribed(self) -> bool:
-        if self.role == UserRole.ADMIN:
-            return True
-        if self.subscription == SubscriptionType.NONE:
-            return False
-        if self.subscription_end and self.subscription_end < datetime.now(self.subscription_end.tzinfo):
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return f"<User {self.full_name} (Role: {self.role.value}, Sub: {self.subscription.value})>"
+    model_config = ConfigDict(from_attributes=True)
