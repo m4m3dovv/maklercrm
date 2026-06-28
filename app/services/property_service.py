@@ -1,9 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import List, Optional
 from app.models.property import Property, PropertyStatus
 from app.models.user import User, UserRole
 from app.repositories.property_repo import property_repo
-from app.schemas.property import PropertyCreate, PropertyUpdate
+from app.schemas.property import PropertyCreate
 from app.core.exceptions import NotFoundException, PermissionDeniedException
 
 class PropertyService:
@@ -18,18 +19,32 @@ class PropertyService:
     async def get_property(db: AsyncSession, property_id: int) -> Property:
         prop = await property_repo.get_by_id(db, property_id)
         if not prop:
-            raise NotFoundException("Ev")
+            raise NotFoundException("Əmlak")
         return prop
 
     @staticmethod
-    async def change_status(db: AsyncSession, property_id: int, new_status: PropertyStatus, actor: User) -> Property:
+    async def change_status(db: AsyncSession, property_id: int, new_status: str, actor: User) -> Property:
         prop = await PropertyService.get_property(db, property_id)
         
         # Yalnız evin agenti, admin və ya manager statusu dəyişə bilər
         if actor.role == UserRole.AGENT and prop.agent_id != actor.id:
             raise PermissionDeniedException()
             
-        return await property_repo.update(db, prop, {"status": new_status})
+        # SQLAlchemy Enum xətasına qarşı:
+        # Biz str dəyərini alıb uyğun Enum obyektini tapırıq
+        if new_status == PropertyStatus.ACTIVE.value:
+            status_enum = PropertyStatus.ACTIVE
+        elif new_status == PropertyStatus.RESERVED.value:
+            status_enum = PropertyStatus.RESERVED
+        elif new_status == PropertyStatus.RENTED.value:
+            status_enum = PropertyStatus.RENTED
+        elif new_status == PropertyStatus.SOLD.value:
+            status_enum = PropertyStatus.SOLD
+        else:
+            status_enum = PropertyStatus.ACTIVE # Əgər naməlum bir şey gələrsə
+
+        # Yalnız statusu yeniləyirik
+        return await property_repo.update(db, prop, {"status": status_enum})
     
     @staticmethod
     async def search(
