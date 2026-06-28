@@ -10,7 +10,6 @@ from app.core.exceptions import NotFoundException, PermissionDeniedException
 class PropertyService:
     @staticmethod
     async def create_property(db: AsyncSession, data: PropertyCreate, actor: User) -> Property:
-        # İstənilən agent ev yarada bilər
         property_data = data.model_dump()
         property_data["agent_id"] = actor.id
         return await property_repo.create(db, property_data)
@@ -26,12 +25,9 @@ class PropertyService:
     async def change_status(db: AsyncSession, property_id: int, new_status: str, actor: User) -> Property:
         prop = await PropertyService.get_property(db, property_id)
         
-        # Yalnız evin agenti, admin və ya manager statusu dəyişə bilər
         if actor.role == UserRole.AGENT and prop.agent_id != actor.id:
             raise PermissionDeniedException()
             
-        # SQLAlchemy Enum xətasına qarşı:
-        # Biz str dəyərini alıb uyğun Enum obyektini tapırıq
         if new_status == PropertyStatus.ACTIVE.value:
             status_enum = PropertyStatus.ACTIVE
         elif new_status == PropertyStatus.RESERVED.value:
@@ -41,9 +37,8 @@ class PropertyService:
         elif new_status == PropertyStatus.SOLD.value:
             status_enum = PropertyStatus.SOLD
         else:
-            status_enum = PropertyStatus.ACTIVE # Əgər naməlum bir şey gələrsə
+            status_enum = PropertyStatus.ACTIVE 
 
-        # Yalnız statusu yeniləyirik
         return await property_repo.update(db, prop, {"status": status_enum})
     
     @staticmethod
