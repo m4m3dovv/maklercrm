@@ -1,11 +1,12 @@
 import json
 import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.models.user import User
 from app.bot.states.property_states import AddPropertyStates
@@ -13,10 +14,11 @@ from app.bot.keyboards.reply import get_cancel_menu, get_main_menu
 from app.bot.keyboards.inline import property_actions_kb, property_status_kb
 from app.schemas.property import PropertyCreate
 from app.services.property_service import PropertyService
-from app.models.property import PropertyStatus, PropertyType, DealType
+from app.models.property import Property, PropertyStatus, PropertyType, DealType
 from app.repositories.property_repo import property_repo
 
 router = Router(name="property_router")
+
 
 # ======================== MENYULAR ========================
 def get_deal_type_kb():
@@ -44,16 +46,28 @@ def get_finish_photo_kb():
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
 
+def get_property_categories_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Yeni Əmlak Əlavə Et", callback_data="add_property_action")
+    kb.button(text="🏢 Bina evlərim", callback_data="my_props_bina")
+    kb.button(text="🏡 Həyət evlərim", callback_data="my_props_heyet")
+    kb.button(text="🌍 Torpaq sahələrim", callback_data="my_props_torpaq")
+    kb.button(text="🏢 Obyektlərim", callback_data="my_props_obyekt")
+    kb.button(text="📋 Bütün Əmlaklarım", callback_data="my_props_all")
+    kb.adjust(1, 2, 2, 1)
+    return kb.as_markup()
 
 # ======================== EVLƏR BÖLMƏSİ ========================
 @router.message(F.text == "🏠 Evlər")
 async def property_menu(message: Message):
-    text = (
-        "🏠 <b>Evlər bölməsi</b>\n\n"
-        "Yeni ev əlavə etmək üçün: /add_property\n"
-        "Aktiv evlərinizi görmək üçün: /my_properties"
-    )
-    await message.answer(text, parse_mode="HTML")
+    text = "🏠 <b>Əmlak İdarəetmə Paneli</b>\n\nAşağıdakı kateqoriyalardan birini seçin:"
+    await message.answer(text, parse_mode="HTML", reply_markup=get_property_categories_kb())
+
+@router.callback_query(F.data == "add_property_action")
+async def action_add_property(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddPropertyStates.waiting_for_deal_type)
+    await callback.message.answer("Əmlak satılır, yoxsa kirayə verilir?", reply_markup=get_deal_type_kb())
+    await callback.answer()
 
 @router.message(Command("add_property"))
 async def start_add_property(message: Message, state: FSMContext):
@@ -147,8 +161,6 @@ async def process_price(message: Message, state: FSMContext):
         return await message.answer("Xahiş olunur, düzgün məbləğ daxil edin:")
         
     await state.update_data(price=price)
-    
-    # Şəkilləri yığmaq üçün əvvəlcədən boş siyahı yaradırıq
     await state.update_data(photo_ids=[])
     
     await state.set_state(AddPropertyStates.waiting_for_photos)
@@ -159,7 +171,6 @@ async def process_price(message: Message, state: FSMContext):
         reply_markup=get_finish_photo_kb(), parse_mode="HTML"
     )
 
-# İXTİYARİ ŞƏKİL GƏLƏNDƏ SİYAHIYA ƏLAVƏ EDİRİK (HƏÇ BİR YADDA SAXLAMA ETMİRİK)
 @router.message(AddPropertyStates.waiting_for_photos, F.photo)
 async def just_collect_photos(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -168,10 +179,8 @@ async def just_collect_photos(message: Message, state: FSMContext):
     await state.update_data(photo_ids=photos)
 
 
-# YALNIZ DÜYMƏYƏ BASILDIQDA YADDA SAXLAYIRIQ
 @router.message(AddPropertyStates.waiting_for_photos, F.text == "✅ Şəkillər Bitdi")
 async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
-    # Bu nöqtəyə gəlirsə deməli düymə oxundu
     await message.answer("Sistemə yazılır, zəhmət olmasa gözləyin... ⏳")
     
     db: AsyncSession = kwargs.get("db")
@@ -227,18 +236,39 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
         await state.clear()
 
 
-# ======================== MƏNİM EVLƏRİM (/my_properties) TAM DETALLI ========================
-@router.message(Command("my_properties"))
-async def show_my_properties(message: Message, **kwargs):
+# ======================== KATEQORİYALARLA EV AXTARIŞI ========================
+@router.callback_query(F.data.startswith("my_props_"))
+async def show_properties_by_category(callback: CallbackQuery, **kwargs):
     db: AsyncSession = kwargs.get("db")
     actor: User = kwargs.get("actor")
+    category_slug = callback.data.split("_")[2]
     
-    properties = await property_repo.get_by_agent(db, agent_id=actor.id, skip=0, limit=20)
+    stmt = select(Property).where(Property.agent_id == actor.id)
+    cat_name = "Bütün Əmlaklarım"
+    
+    if category_slug == "bina":
+        stmt = stmt.where(Property.property_type == PropertyType.BINA_EVI)
+        cat_name = "🏢 Bina Evləri"
+    elif category_slug == "heyet":
+        stmt = stmt.where(Property.property_type == PropertyType.HEYET_EVI)
+        cat_name = "🏡 Həyət / Bağ Evləri"
+    elif category_slug == "torpaq":
+        stmt = stmt.where(Property.property_type == PropertyType.TORPAQ)
+        cat_name = "🌍 Torpaq Sahələri"
+    elif category_slug == "obyekt":
+        stmt = stmt.where(Property.property_type == PropertyType.OBYEKT)
+        cat_name = "🏢 Obyekt / Ofis"
+        
+    stmt = stmt.limit(30)
+    result = await db.execute(stmt)
+    properties = result.scalars().all()
+    
+    await callback.answer()
     
     if not properties:
-        return await message.answer("Sizin hələ heç bir aktiv əmlak elanınız yoxdur.\nYeni ev əlavə etmək üçün: /add_property")
+        return await callback.message.answer(f"Sizin hələ heç bir aktiv <b>{cat_name}</b> elanınız yoxdur.", parse_mode="HTML")
         
-    await message.answer(f"Sizin ümumi <b>{len(properties)}</b> elanınız var. Aşağıda siyahısı verilmişdir:", parse_mode="HTML")
+    await callback.message.answer(f"Seçim: <b>{cat_name}</b>\nTapılan əmlak sayı: <b>{len(properties)}</b>", parse_mode="HTML")
     
     for prop in properties:
         text = (
@@ -255,14 +285,14 @@ async def show_my_properties(message: Message, **kwargs):
         
         if prop.images:
             try:
-                photos = json.dumps(prop.images) if isinstance(prop.images, list) else json.loads(prop.images)
+                photos = json.loads(prop.images)
                 if photos and len(photos) > 0:
-                    await message.answer_photo(photos[0], caption=text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
+                    await callback.message.answer_photo(photos[0], caption=text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
                     continue
             except Exception:
                 pass
                 
-        await message.answer(text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
 
 
 # ======================== CALLBACK QUERIES ========================
@@ -296,11 +326,9 @@ async def set_property_status(callback: CallbackQuery, **kwargs):
     except Exception as e:
         await callback.answer(f"Xəta: {e}", show_alert=True)
 
-# GERİ DÜYMƏSİ ÜÇÜN FUNKSİYA (Bura da əlavə olundu!)
 @router.callback_query(F.data.startswith("prop_view_"))
 async def back_to_property_view(callback: CallbackQuery, **kwargs):
     db: AsyncSession = kwargs.get("db")
-    
     prop_id = int(callback.data.split("_")[-1])
     prop = await property_repo.get_by_id(db, prop_id)
     if not prop:
@@ -317,5 +345,4 @@ async def back_to_property_view(callback: CallbackQuery, **kwargs):
         f"💰 Qiymət: <b>{prop.price:,.2f} AZN</b>\n"
         f"📊 Status: <b>{prop.status.value.upper()}</b>"
     )
-    
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
