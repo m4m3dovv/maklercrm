@@ -39,7 +39,7 @@ def get_property_type_kb():
 
 def get_finish_photo_kb():
     kb = ReplyKeyboardBuilder()
-    kb.button(text="✅ Şəkillər bitdi (Yadda saxla)")
+    kb.button(text="✅ Şəkillər Bitdi")
     kb.button(text="❌ Ləğv et")
     kb.adjust(1)
     return kb.as_markup(resize_keyboard=True)
@@ -147,27 +147,31 @@ async def process_price(message: Message, state: FSMContext):
         return await message.answer("Xahiş olunur, düzgün məbləğ daxil edin:")
         
     await state.update_data(price=price)
+    
+    # Şəkilləri yığmaq üçün əvvəlcədən boş siyahı yaradırıq
     await state.update_data(photo_ids=[])
     
     await state.set_state(AddPropertyStates.waiting_for_photos)
     await message.answer(
         "Əla! İndi mənə əmlakın şəkillərini göndərin.\n\n"
-        "Bütün şəkilləri göndərdikdən sonra <b>AŞAĞIDAKI DÜYMƏNİ</b> sıxın:", 
+        "Bütün şəkilləri (tək-tək və ya qrup halında) göndərdikdən sonra "
+        "MÜTLƏQ aşağıdakı düyməni sıxın ki, bazaya yadda saxlanılsın:", 
         reply_markup=get_finish_photo_kb(), parse_mode="HTML"
     )
 
-# ŞƏKİLLƏRİ QƏBUL EDİRİK
+# İXTİYARİ ŞƏKİL GƏLƏNDƏ SİYAHIYA ƏLAVƏ EDİRİK (HƏÇ BİR YADDA SAXLAMA ETMİRİK)
 @router.message(AddPropertyStates.waiting_for_photos, F.photo)
-async def collect_photos(message: Message, state: FSMContext):
+async def just_collect_photos(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photo_ids", [])
     photos.append(message.photo[-1].file_id)
     await state.update_data(photo_ids=photos)
 
 
-# DÜYMƏYƏ BASILDIQDA İŞLƏYƏCƏK KOD
-@router.message(AddPropertyStates.waiting_for_photos, F.text == "✅ Şəkillər bitdi (Yadda saxla)")
+# YALNIZ DÜYMƏYƏ BASILDIQDA YADDA SAXLAYIRIQ
+@router.message(AddPropertyStates.waiting_for_photos, F.text == "✅ Şəkillər Bitdi")
 async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
+    # Bu nöqtəyə gəlirsə deməli düymə oxundu
     await message.answer("Sistemə yazılır, zəhmət olmasa gözləyin... ⏳")
     
     db: AsyncSession = kwargs.get("db")
@@ -202,7 +206,7 @@ async def save_all_property_data(message: Message, state: FSMContext, **kwargs):
             f"✅ <b>Əmlak uğurla bazaya əlavə edildi!</b> (ID: {property_obj.id})\n\n"
             f"🏷 <b>{property_obj.deal_type.value}</b> - {property_obj.property_type.value}\n"
             f"📌 {property_obj.title}\n"
-            f"📍 Ünvan: {property_obj.district}, {property_obj.address}\n"
+            f"📍 {property_obj.district}, {property_obj.address}\n"
             f"🚪 Otaq: {property_obj.room_count} | 📐 Sahə: {property_obj.area} kv.m\n"
             f"🏢 Mərtəbə: {property_obj.floor} / {property_obj.total_floors}\n"
             f"📄 Sənəd: {property_obj.document_type}\n"
@@ -237,7 +241,6 @@ async def show_my_properties(message: Message, **kwargs):
     await message.answer(f"Sizin ümumi <b>{len(properties)}</b> elanınız var. Aşağıda siyahısı verilmişdir:", parse_mode="HTML")
     
     for prop in properties:
-        # BÜTÜN DETALLARI EKRANA ÇIXARIRIQ
         text = (
             f"📌 <b>{prop.title}</b> (ID: {prop.id})\n"
             f"🏷 <b>{prop.deal_type.value}</b> - {prop.property_type.value}\n"
@@ -292,3 +295,27 @@ async def set_property_status(callback: CallbackQuery, **kwargs):
         await callback.message.edit_text(f"✅ Əmlakın statusu dəyişdirildi: <b>{new_status.upper()}</b>", parse_mode="HTML")
     except Exception as e:
         await callback.answer(f"Xəta: {e}", show_alert=True)
+
+# GERİ DÜYMƏSİ ÜÇÜN FUNKSİYA (Bura da əlavə olundu!)
+@router.callback_query(F.data.startswith("prop_view_"))
+async def back_to_property_view(callback: CallbackQuery, **kwargs):
+    db: AsyncSession = kwargs.get("db")
+    
+    prop_id = int(callback.data.split("_")[-1])
+    prop = await property_repo.get_by_id(db, prop_id)
+    if not prop:
+        return await callback.answer("Əmlak tapılmadı.", show_alert=True)
+        
+    text = (
+        f"📌 <b>{prop.title}</b> (ID: {prop.id})\n"
+        f"🏷 <b>{prop.deal_type.value}</b> - {prop.property_type.value}\n"
+        f"📍 {prop.district}, {prop.address}\n"
+        f"🚪 Otaq: {prop.room_count} | 📐 Sahə: {prop.area} kv.m\n"
+        f"🏢 Mərtəbə: {prop.floor} / {prop.total_floors}\n"
+        f"📄 Sənəd: {prop.document_type}\n"
+        f"📞 Sahib: <code>{prop.owner_phone}</code>\n"
+        f"💰 Qiymət: <b>{prop.price:,.2f} AZN</b>\n"
+        f"📊 Status: <b>{prop.status.value.upper()}</b>"
+    )
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=property_actions_kb(prop.id))
