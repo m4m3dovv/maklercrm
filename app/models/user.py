@@ -11,9 +11,9 @@ class UserRole(str, Enum):
     AGENT = "agent"
 
 class SubscriptionType(str, Enum):
-    NONE = "none"           # Ödəniş etməyib
-    STANDART = "standart"   # 15 AZN paketi
-    PREMIUM = "premium"     # 30 AZN paketi
+    NONE = "none"
+    STANDART = "standart"
+    PREMIUM = "premium"
 
 class User(Base, TimestampMixin):
     __tablename__ = "users"
@@ -25,13 +25,11 @@ class User(Base, TimestampMixin):
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     role: Mapped[UserRole] = mapped_column(default=UserRole.AGENT, nullable=False)
     
-    # Abunəlik sistemi üçün yeni sahələr
     subscription: Mapped[SubscriptionType] = mapped_column(default=SubscriptionType.NONE, nullable=False)
     subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    # Əlaqələr
     properties: Mapped[List["Property"]] = relationship(
         "Property", back_populates="agent", cascade="all, delete-orphan"
     )
