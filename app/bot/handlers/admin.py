@@ -3,6 +3,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.models.user import User, UserRole, SubscriptionType
 from app.services.stats_service import StatsService
@@ -25,7 +26,6 @@ async def secret_admin_command(message: Message, db: AsyncSession, actor: User):
 # ================== MÜŞTƏRİ ABUNƏLİYİNİ AKTİVLƏŞDİRMƏK ==================
 @router.message(Command("activate"))
 async def activate_user_subscription(message: Message, db: AsyncSession, actor: User):
-    # Yalnız adminlər abunəlik aktiv edə bilər
     if actor.role != UserRole.ADMIN:
         return await message.answer("⚠️ Bu komandanı yalnız Administrator icra edə bilər.")
         
@@ -48,12 +48,10 @@ async def activate_user_subscription(message: Message, db: AsyncSession, actor: 
     if package not in ["standart", "premium"]:
         return await message.answer("Paket növü səhvdir. Yalnız 'standart' və ya 'premium' yaza bilərsiniz.")
         
-    # İstifadəçini bazadan tapırıq
     target_user = await user_repo.get_by_telegram_id(db, target_id)
     if not target_user:
         return await message.answer(f"❌ <b>{target_id}</b> İD-li istifadəçi tapılmadı. O bota ən azı 1 dəfə '/start' yazmalıdır.", parse_mode="HTML")
         
-    # Abunəlik vaxtını təyin edirik
     current_time = datetime.now(timezone.utc)
     if target_user.subscription_end and target_user.subscription_end > current_time:
         new_end_date = target_user.subscription_end + timedelta(days=30 * months)
@@ -62,7 +60,6 @@ async def activate_user_subscription(message: Message, db: AsyncSession, actor: 
         
     sub_type = SubscriptionType.PREMIUM if package == "premium" else SubscriptionType.STANDART
     
-    # Bazada yeniləyirik
     await user_repo.update(db, target_user, {
         "subscription": sub_type,
         "subscription_end": new_end_date,
@@ -78,8 +75,6 @@ async def activate_user_subscription(message: Message, db: AsyncSession, actor: 
         parse_mode="HTML"
     )
     
-    # Qeyd: Əgər istifadəçiyə də bildiriş getməsini istəyirsinizsə, burada bot vasitəsilə 
-    # await message.bot.send_message(target_user.telegram_id, "Təbriklər abunəliyiniz aktiv oldu") yaza bilərik.
     try:
         await message.bot.send_message(
             target_user.telegram_id, 
@@ -90,8 +85,43 @@ async def activate_user_subscription(message: Message, db: AsyncSession, actor: 
             parse_mode="HTML"
         )
     except Exception:
-        # Adam botu bloklayıbsa bildiriş getməyəcək, amma biz xəta vermirik
         pass
+
+
+# ================== AGENTLƏR DÜYMƏSİ ==================
+@router.message(F.text == "👨‍💼 Agentlər")
+async def show_agents(message: Message, **kwargs):
+    db: AsyncSession = kwargs.get("db")
+    actor: User = kwargs.get("actor")
+    
+    if actor.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        return await message.answer("⚠️ Bu bölməyə giriş icazəniz yoxdur.")
+        
+    stmt = select(User).where(User.role == UserRole.AGENT)
+    result = await db.execute(stmt)
+    agents = result.scalars().all()
+    
+    if not agents:
+        return await message.answer("Sistemdə heç bir agent tapılmadı.")
+        
+    response = f"👥 <b>Sistemdəki Agentlər (Cəmi: {len(agents)})</b>\n\n"
+    for agent in agents:
+        status = "🟢 Aktiv" if agent.is_active else "🔴 Passiv"
+        sub = agent.subscription.value.upper()
+        if agent.subscription_end:
+            sub_time = agent.subscription_end.strftime("%d.%m.%Y")
+        else:
+            sub_time = "Yoxdur"
+            
+        response += (
+            f"👤 <b>{agent.full_name}</b>\n"
+            f"🆔 ID: <code>{agent.telegram_id}</code>\n"
+            f"💎 Paket: {sub} (Bitir: {sub_time})\n"
+            f"📊 Status: {status}\n"
+            f"---------------------------\n"
+        )
+        
+    await message.answer(response, parse_mode="HTML")
 
 
 # ======================== STATİSTİKA ========================
