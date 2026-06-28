@@ -47,17 +47,24 @@ async def subscription_menu(message: Message):
     )
     await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
-# Qeyd: Gələcəkdə burada real ödəniş (Stripe/Pulpal) API quraşdırılacaq. İndilik admin-ə bildiriş getməli və ya təsdiqlənməlidir.
+
 @router.callback_query(F.data.startswith("pay_"))
-async def fake_payment_checkout(callback: CallbackQuery):
+async def real_payment_checkout(callback: CallbackQuery):
     pack = callback.data.split("_")[1]
     amount = 15 if pack == "standart" else 30
     
-    await callback.message.edit_text(
-        f"Müraciətiniz qəbul edildi. Zəhmət olmasa kartınıza <b>{amount} AZN</b> mədaxil edin və "
-        f"qəbzi sistemin rəhbərinə göndərin. Sizin Telegram İD-niz: <code>{callback.from_user.id}</code>",
-        parse_mode="HTML"
+    payment_text = (
+        f"💳 <b>Ödəniş Məlumatları ({pack.capitalize()} Paket)</b>\n\n"
+        f"Məbləğ: <b>{amount} AZN</b>\n\n"
+        f"Zəhmət olmasa ödənişi aşağıdakı kart hesabına edin:\n\n"
+        f"💳 <b>KART NÖMRƏSİ:</b> <code>5522099361231947</code>\n\n"
+        f"✅ Ödənişi etdikdən sonra qəbzi WhatsApp və ya Telegram vasitəsilə\n"
+        f"📞 <b>077-505-75-55</b> nömrəsinə göndərin.\n\n"
+        f"<i>Qeyd: Qəbzi göndərərkən sizin sistemdəki İD nömrənizi (<code>{callback.from_user.id}</code>) əlavə etməyi unutmayın. Təsdiqləndikdən dərhal sonra abunəliyiniz aktiv ediləcək!</i>"
     )
+    
+    await callback.message.edit_text(payment_text, parse_mode="HTML")
+
 
 @router.message(F.text == "❌ Ləğv et")
 async def cancel_action(message: Message, actor: User, state: FSMContext):
